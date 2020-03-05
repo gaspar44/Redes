@@ -64,7 +64,6 @@ int main(int argc, char **argv) {
 		recvLen = recvfrom(socketFileDescriptor,messageReaded,BUFSIZE,0,(struct sockaddr *)& clientAddress,&addressLen);
 		
 		if (recvLen > 0){
-			//messageReaded[recvLen] = 0;
 			unsigned int bytesToSendBack = (unsigned int ) recvLen;
 
 			ssize_t error = sendto(socketFileDescriptor,messageReaded,bytesToSendBack,0,(struct sockaddr*)&clientAddress,sizeof(clientAddress));

@@ -5,3 +5,8 @@ trivial_torrent-v1/trivial_torrent/.idea/*
 trivial_torrent-v1/trivial_torrent/.cproject
 trivial_torrent-v1/deliverables/*
 trivial_torrent-v1/reference_binaries/*
+client
+client.c
+server
+server.c
+prueba.c

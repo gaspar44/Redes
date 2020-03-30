@@ -10,3 +10,6 @@ client.c
 server
 server.c
 prueba.c
+.cproject
+.project
+.settings/

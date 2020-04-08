@@ -1,4 +1,3 @@
-
 // Trivial Torrent
 
 // TODO: some includes here
@@ -7,6 +6,7 @@
 #include "logger.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -15,7 +15,8 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 void createServer(char *portCandidate);
-void createClient(char *metaFileToDownloadFromServer);
+void createClient(const struct torrent_t *metaInfoFile);
+struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -41,20 +42,15 @@ void createServer(char *portCandidate ) {
 	log_printf(LOG_INFO,"Server mode (port %d)\n",port);
 
 	//TODO: server stuff
-
-
 }
 
-void createClient(char *metaFileToDownloadFromServer){
+struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
 	char * extension = strtok(metaFileToDownloadFromServer,".");
 	char leftPartOfName[1024] = {0};
 	strcpy(leftPartOfName,extension);
 	strcat(leftPartOfName,".txt");
 	extension = strtok(NULL,".");
 	metaFileToDownloadFromServer = strcat(metaFileToDownloadFromServer,".ttorrent");
-
-
-	printf("parte izquierda %s\n",leftPartOfName);
 
 	if (extension == NULL) {
 		log_printf(LOG_INFO,"ERROR: NO EXTENSION FOUND");
@@ -73,10 +69,65 @@ void createClient(char *metaFileToDownloadFromServer){
 	if (creationSuccess == -1 ){
 		log_printf(LOG_INFO, "error parsing file");
 	}
+	
+	return metaFileInfo;
+}
 
+void createClient(const struct torrent_t *metaFileInfo){
+	int sockfd;
+	struct sockaddr_in servaddr;
 
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
 
+	log_printf(LOG_INFO,"Socket created successfully\n");
+	memset((char *)&servaddr,0,sizeof(servaddr));
 
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	servaddr.sin_port = htons(8080);
+
+	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
+		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+
+	log_printf(LOG_INFO,"Socket connected successfully\n");
+	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
+		void *blockToRequest[] = {MAGIC_NUMBER,MSG_REQUEST,blockNumber};//(char*) malloc(RAW_MESSAGE_SIZE);
+
+//		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
+//		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
+//		memcpy(blockToRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &blockNumber,sizeof(blockNumber));
+		ssize_t error = send(sockfd,&blockToRequest,RAW_MESSAGE_SIZE,0);
+
+		if (error < 0){
+			log_printf(LOG_INFO, "error received from server");
+			exit(EXIT_FAILURE);
+		}
+
+		struct block_t block;
+		block.size = get_block_size(metaFileInfo, blockNumber);
+		ssize_t readedBytes = recv(sockfd,block.data,sizeof(block),0);
+
+		if ( readedBytes > 0) {
+			log_printf(LOG_INFO, "data of block %ld received\n",blockNumber);
+		}
+
+		else {
+			log_printf(LOG_INFO,"error received");
+			exit(EXIT_FAILURE);
+		}
+
+//		unsigned char *md = malloc(block.size);
+//		SHA256(block.data,block.size, md);
+		//free(blockToRequest);
+		//free(md);
+	}
+	shutdown(sockfd, 2);
+	close(sockfd);
 }
 
 /**
@@ -92,7 +143,6 @@ int main(int argc, char **argv) {
 		log_printf(LOG_INFO,"ERROR: Usage is: ttorrent [-l port] file.ttorrent\n");
 		exit(EXIT_FAILURE);
 	}
-
 
 	else if (argc == 4){
 		int foundServerPortFlag = 0;
@@ -111,8 +161,19 @@ int main(int argc, char **argv) {
 	}
 
 	else {
-		createClient(argv[argc - 1]);
+		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1]);
+		createClient(&metaFileInfo);
 	}
+	/*int size = sizeof(my_msg); //get 
+
+                char* buffer[size];
+                memset(buffer, 0x00, size);
+
+                memcpy(buffer, &my_msg, size);
+
+
+                ssize_t messagee = send(sock_server, buffer, size, 0);
+	*/
 
 	// ==========================================================================
 	// Parse command line

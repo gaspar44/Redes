@@ -15,8 +15,9 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 void createServer(char *portCandidate);
-void createClient(const struct torrent_t *metaInfoFile);
+void createClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
+int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -24,7 +25,9 @@ static const uint8_t MSG_REQUEST = 0;
 static const uint8_t MSG_RESPONSE_OK = 1;
 static const uint8_t MSG_RESPONSE_NA = 2;
 
-enum { RAW_MESSAGE_SIZE = 13 };
+enum { RAW_MESSAGE_SIZE = 13,
+	RAW_RESPONSE_SIZE = 13
+};
 
 void createServer(char *portCandidate ) {
 	int port = atoi(portCandidate);
@@ -42,6 +45,31 @@ void createServer(char *portCandidate ) {
 	log_printf(LOG_INFO,"Server mode (port %d)\n",port);
 
 	//TODO: server stuff
+}
+int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
+	log_printf(LOG_INFO,"checking header...");
+	uint32_t *responseMagicNumber = (uint32_t *) serverResponse;
+	uint8_t *responseMessage = (uint8_t *)(serverResponse + sizeof(MAGIC_NUMBER));
+	uint64_t *responseBlockNumer = (uint64_t *) (serverResponse + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK));
+
+
+	if (*responseMessage != 1){
+		log_printf(LOG_INFO, "invalid message from server");
+		return -1;
+	}
+
+	if (*responseMagicNumber != MAGIC_NUMBER){
+		log_printf(LOG_INFO, "invalid Magic number from server");
+		return -1;
+	}
+
+	if (*responseBlockNumer != blockNumber){
+		log_printf(LOG_INFO, "invalid block");
+		return -1;
+	}
+
+	log_printf(LOG_INFO, "Valid header!");
+	return 0;
 }
 
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
@@ -73,7 +101,7 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
 	return metaFileInfo;
 }
 
-void createClient(const struct torrent_t *metaFileInfo){
+void createClient(struct torrent_t *metaFileInfo){
 	int sockfd;
 	struct sockaddr_in servaddr;
 
@@ -96,12 +124,13 @@ void createClient(const struct torrent_t *metaFileInfo){
 
 	log_printf(LOG_INFO,"Socket connected successfully\n");
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
-		void *blockToRequest[] = {MAGIC_NUMBER,MSG_REQUEST,blockNumber};//(char*) malloc(RAW_MESSAGE_SIZE);
+		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
 
-//		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
-//		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
-//		memcpy(blockToRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &blockNumber,sizeof(blockNumber));
-		ssize_t error = send(sockfd,&blockToRequest,RAW_MESSAGE_SIZE,0);
+		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
+		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
+		memcpy(blockToRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &blockNumber,sizeof(blockNumber));
+
+		ssize_t error = send(sockfd,blockToRequest,RAW_MESSAGE_SIZE,0);
 
 		if (error < 0){
 			log_printf(LOG_INFO, "error received from server");
@@ -110,20 +139,65 @@ void createClient(const struct torrent_t *metaFileInfo){
 
 		struct block_t block;
 		block.size = get_block_size(metaFileInfo, blockNumber);
-		ssize_t readedBytes = recv(sockfd,block.data,sizeof(block),0);
 
-		if ( readedBytes > 0) {
+		char *serverResponse = malloc(RAW_RESPONSE_SIZE + block.size);
+		ssize_t totalReadedBytes = 0;
+
+		while (1) {
+			ssize_t partialReadedBytes = recv(sockfd,serverResponse,RAW_RESPONSE_SIZE + block.size,0);
+
+			if (partialReadedBytes < 0) {
+				log_printf(LOG_INFO, "error reading from server");
+				exit(EXIT_FAILURE);
+			}
+
+			else {
+				totalReadedBytes = totalReadedBytes + partialReadedBytes;
+				printf("%ld\n",totalReadedBytes);
+				if ((uint64_t)totalReadedBytes == RAW_RESPONSE_SIZE + block.size){
+					break;
+				}
+			}
+		}
+
+//		if (totalReadedBytes != RAW_RESPONSE_SIZE + block.size) {
+//			log_printf(LOG_INFO, "expected bytes: %ld\nactual bytes: %ld\n",RAW_RESPONSE_SIZE,totalReadedBytes);
+//			exit(EXIT_FAILURE);
+//		}
+			int validHeader = checkResponseHeader(serverResponse,blockNumber);
+
+			if (validHeader == -1){
+				log_printf(LOG_INFO, "error in header");
+				blockNumber--;
+
+				free(blockToRequest);
+				free(serverResponse);
+
+				continue;
+			}
+
 			log_printf(LOG_INFO, "data of block %ld received\n",blockNumber);
-		}
+			log_printf(LOG_INFO, "Verifying block...");
+			uint8_t * blockData = (uint8_t *) (serverResponse + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK) + sizeof(blockNumber));
+			memcpy(block.data, blockData, block.size);
+			//block.data = blockData;
 
-		else {
-			log_printf(LOG_INFO,"error received");
-			exit(EXIT_FAILURE);
-		}
+			//exit(1);//
+			int isValid = store_block(metaFileInfo, blockNumber, &block);
 
-//		unsigned char *md = malloc(block.size);
+			if (isValid != 0){
+				log_printf(LOG_INFO, "Invalid block, request again");
+				blockNumber--;
+			}
+
+			else {
+				log_printf(LOG_INFO, "Valid block");
+			}
+
+		//		unsigned char *md = malloc(block.size);
 //		SHA256(block.data,block.size, md);
-		//free(blockToRequest);
+		free(blockToRequest);
+		free(serverResponse);
 		//free(md);
 	}
 	shutdown(sockfd, 2);

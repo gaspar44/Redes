@@ -15,10 +15,10 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 void createServer(char *portCandidate);
-void createClient(struct torrent_t *metaInfoFile);
+int createClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
-void downloadFile(struct torrent_t *metaFileInfo,int sockfd);
+int downloadFile(struct torrent_t *metaFileInfo,int sockfd);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -55,9 +55,13 @@ int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	uint64_t *responseBlockNumer = (uint64_t *) (serverResponse + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK));
 
 
-	if (*responseMessage != 1){
-		log_printf(LOG_INFO, "invalid message from server");
+	if (*responseMessage == 0){
+		log_printf(LOG_INFO, "invalid message from server\n");
 		return -1;
+	}
+
+	if (*responseMessage == 2){
+		return 2;
 	}
 
 	if (*responseMagicNumber != MAGIC_NUMBER){
@@ -73,7 +77,8 @@ int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	log_printf(LOG_INFO, "Valid header!");
 	return 0;
 }
-void downloadFile(struct torrent_t *metaFileInfo,int sockfd){
+
+int downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
 
@@ -104,7 +109,6 @@ void downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 
 			else {
 				totalReadedBytes = totalReadedBytes + partialReadedBytes;
-				printf("%ld\n",totalReadedBytes);
 				if ((uint64_t)totalReadedBytes == RAW_RESPONSE_SIZE + block.size){
 					break;
 				}
@@ -119,6 +123,12 @@ void downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 				free(blockToRequest);
 				free(serverResponse);
 				continue;
+			}
+
+			if (validHeader == 2){
+				free(blockToRequest);
+				free(serverResponse);
+				return 1;
 			}
 
 			log_printf(LOG_INFO, "data of block %ld received\n",blockNumber);
@@ -139,6 +149,8 @@ void downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 		free(blockToRequest);
 		free(serverResponse);
 	}
+
+	return 0;
 }
 
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
@@ -170,7 +182,7 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
 	return metaFileInfo;
 }
 
-void createClient(struct torrent_t *metaFileInfo){
+int createClient(struct torrent_t *metaFileInfo){
 	int sockfd;
 	struct sockaddr_in servaddr;
 
@@ -193,11 +205,11 @@ void createClient(struct torrent_t *metaFileInfo){
 
 	log_printf(LOG_INFO,"Socket connected successfully\n");
 
-	downloadFile(metaFileInfo,sockfd);
+	int isDownloadedOrInvalid = downloadFile(metaFileInfo,sockfd);
 
-	log_printf(LOG_INFO, "file downloaded ;)");
-	destroy_torrent(metaFileInfo);
+//	log_printf(LOG_INFO, "file downloaded ;)");
 	close(sockfd);
+	return isDownloadedOrInvalid;
 }
 
 /**
@@ -232,7 +244,17 @@ int main(int argc, char **argv) {
 
 	else {
 		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1]);
-		createClient(&metaFileInfo);
+		int fileDownloaded =createClient(&metaFileInfo);
+
+		if (fileDownloaded == 0){
+			log_printf(LOG_INFO, "File downloaded :)");
+		}
+
+		else if (fileDownloaded == 1){
+			log_printf(LOG_INFO,"file not downloaded");
+		}
+
+		destroy_torrent(&metaFileInfo);
 	}
 
 	// ==========================================================================

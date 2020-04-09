@@ -207,8 +207,8 @@ int createClient(struct torrent_t *metaFileInfo){
 
 	int isDownloadedOrInvalid = downloadFile(metaFileInfo,sockfd);
 
-//	log_printf(LOG_INFO, "file downloaded ;)");
 	close(sockfd);
+
 	return isDownloadedOrInvalid;
 }
 

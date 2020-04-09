@@ -18,6 +18,7 @@ void createServer(char *portCandidate);
 void createClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
+void downloadFile(struct torrent_t *metaFileInfo,int sockfd);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -46,6 +47,7 @@ void createServer(char *portCandidate ) {
 
 	//TODO: server stuff
 }
+
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	log_printf(LOG_INFO,"checking header...");
 	uint32_t *responseMagicNumber = (uint32_t *) serverResponse;
@@ -71,58 +73,7 @@ int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	log_printf(LOG_INFO, "Valid header!");
 	return 0;
 }
-
-struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
-	char * extension = strtok(metaFileToDownloadFromServer,".");
-	char leftPartOfName[1024] = {0};
-	strcpy(leftPartOfName,extension);
-	strcat(leftPartOfName,".txt");
-	extension = strtok(NULL,".");
-	metaFileToDownloadFromServer = strcat(metaFileToDownloadFromServer,".ttorrent");
-
-	if (extension == NULL) {
-		log_printf(LOG_INFO,"ERROR: NO EXTENSION FOUND");
-		exit(EXIT_FAILURE);
-	}
-
-	else if (strcmp(extension,"ttorrent") != 0){
-		log_printf(LOG_INFO,"ERROR: Invalid torrent file extension");
-		exit(EXIT_FAILURE);
-	}
-
-	struct torrent_t metaFileInfo;
-
-	int creationSuccess = create_torrent_from_metainfo_file(metaFileToDownloadFromServer,&metaFileInfo,leftPartOfName);
-
-	if (creationSuccess == -1 ){
-		log_printf(LOG_INFO, "error parsing file");
-	}
-	
-	return metaFileInfo;
-}
-
-void createClient(struct torrent_t *metaFileInfo){
-	int sockfd;
-	struct sockaddr_in servaddr;
-
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
-		exit(EXIT_FAILURE);
-	}
-
-	log_printf(LOG_INFO,"Socket created successfully\n");
-	memset((char *)&servaddr,0,sizeof(servaddr));
-
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	servaddr.sin_port = htons(8080);
-
-	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
-		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
-		exit(EXIT_FAILURE);
-	}
-
-	log_printf(LOG_INFO,"Socket connected successfully\n");
+void downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
 
@@ -159,11 +110,6 @@ void createClient(struct torrent_t *metaFileInfo){
 				}
 			}
 		}
-
-//		if (totalReadedBytes != RAW_RESPONSE_SIZE + block.size) {
-//			log_printf(LOG_INFO, "expected bytes: %ld\nactual bytes: %ld\n",RAW_RESPONSE_SIZE,totalReadedBytes);
-//			exit(EXIT_FAILURE);
-//		}
 			int validHeader = checkResponseHeader(serverResponse,blockNumber);
 
 			if (validHeader == -1){
@@ -172,7 +118,6 @@ void createClient(struct torrent_t *metaFileInfo){
 
 				free(blockToRequest);
 				free(serverResponse);
-
 				continue;
 			}
 
@@ -180,9 +125,6 @@ void createClient(struct torrent_t *metaFileInfo){
 			log_printf(LOG_INFO, "Verifying block...");
 			uint8_t * blockData = (uint8_t *) (serverResponse + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK) + sizeof(blockNumber));
 			memcpy(block.data, blockData, block.size);
-			//block.data = blockData;
-
-			//exit(1);//
 			int isValid = store_block(metaFileInfo, blockNumber, &block);
 
 			if (isValid != 0){
@@ -194,13 +136,67 @@ void createClient(struct torrent_t *metaFileInfo){
 				log_printf(LOG_INFO, "Valid block");
 			}
 
-		//		unsigned char *md = malloc(block.size);
-//		SHA256(block.data,block.size, md);
 		free(blockToRequest);
 		free(serverResponse);
-		//free(md);
 	}
-	shutdown(sockfd, 2);
+}
+
+struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
+	char * extension = strtok(metaFileToDownloadFromServer,".");
+	char leftPartOfName[1024] = {0};
+	strcpy(leftPartOfName,extension);
+	strcat(leftPartOfName,".txt");
+	extension = strtok(NULL,".");
+	metaFileToDownloadFromServer = strcat(metaFileToDownloadFromServer,".ttorrent");
+
+	if (extension == NULL) {
+		log_printf(LOG_INFO,"ERROR: NO EXTENSION FOUND");
+		exit(EXIT_FAILURE);
+	}
+
+	else if (strcmp(extension,"ttorrent") != 0){
+		log_printf(LOG_INFO,"ERROR: Invalid torrent file extension");
+		exit(EXIT_FAILURE);
+	}
+
+	struct torrent_t metaFileInfo;
+
+	int creationSuccess = create_torrent_from_metainfo_file(metaFileToDownloadFromServer,&metaFileInfo,leftPartOfName);
+
+	if (creationSuccess == -1 ){
+		log_printf(LOG_INFO, "error parsing file");
+	}
+
+	return metaFileInfo;
+}
+
+void createClient(struct torrent_t *metaFileInfo){
+	int sockfd;
+	struct sockaddr_in servaddr;
+
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+
+	log_printf(LOG_INFO,"Socket created successfully\n");
+	memset((char *)&servaddr,0,sizeof(servaddr));
+
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	servaddr.sin_port = htons(8080);
+
+	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
+		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+
+	log_printf(LOG_INFO,"Socket connected successfully\n");
+
+	downloadFile(metaFileInfo,sockfd);
+
+	log_printf(LOG_INFO, "file downloaded ;)");
+	destroy_torrent(metaFileInfo);
 	close(sockfd);
 }
 
@@ -238,16 +234,6 @@ int main(int argc, char **argv) {
 		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1]);
 		createClient(&metaFileInfo);
 	}
-	/*int size = sizeof(my_msg); //get 
-
-                char* buffer[size];
-                memset(buffer, 0x00, size);
-
-                memcpy(buffer, &my_msg, size);
-
-
-                ssize_t messagee = send(sock_server, buffer, size, 0);
-	*/
 
 	// ==========================================================================
 	// Parse command line

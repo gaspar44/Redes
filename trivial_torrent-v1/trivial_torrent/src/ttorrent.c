@@ -15,10 +15,11 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 void createServer(char *portCandidate);
-int createClient(struct torrent_t *metaInfoFile);
+int startClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
-int downloadFile(struct torrent_t *metaFileInfo,int sockfd);
+int downloadFile(struct torrent_t *metaFileInfo);
+int createServerConnection(struct torrent_t *metaFileInfo,int blockNumber);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -78,9 +79,36 @@ int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	return 0;
 }
 
-int downloadFile(struct torrent_t *metaFileInfo,int sockfd){
+int createServerConnection(struct torrent_t *metaFileInfo,int blockNumber) {
+	int sockfd;
+	struct sockaddr_in servaddr;
+
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+
+	log_printf(LOG_INFO,"Socket created successfully\n");
+	memset((char *)&servaddr,0,sizeof(servaddr));
+
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = *(uint32_t*)metaFileInfo->peers[blockNumber].peer_address;
+	servaddr.sin_port = metaFileInfo->peers[blockNumber].peer_port;
+
+	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
+		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
+		exit(EXIT_FAILURE);
+	}
+
+	log_printf(LOG_INFO,"Socket connected successfully\n");
+
+	return sockfd;
+}
+
+int downloadFile(struct torrent_t *metaFileInfo){
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
+		int sockfd = createServerConnection(metaFileInfo, (int)blockNumber);
 
 		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
@@ -122,12 +150,14 @@ int downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 
 				free(blockToRequest);
 				free(serverResponse);
+				close(sockfd);
 				continue;
 			}
 
 			if (validHeader == 2){
 				free(blockToRequest);
 				free(serverResponse);
+				close(sockfd);
 				return 1;
 			}
 
@@ -148,6 +178,7 @@ int downloadFile(struct torrent_t *metaFileInfo,int sockfd){
 
 		free(blockToRequest);
 		free(serverResponse);
+		close(sockfd);
 	}
 
 	return 0;
@@ -182,32 +213,8 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
 	return metaFileInfo;
 }
 
-int createClient(struct torrent_t *metaFileInfo){
-	int sockfd;
-	struct sockaddr_in servaddr;
-
-	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
-		exit(EXIT_FAILURE);
-	}
-
-	log_printf(LOG_INFO,"Socket created successfully\n");
-	memset((char *)&servaddr,0,sizeof(servaddr));
-
-	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	servaddr.sin_port = htons(8080);
-
-	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
-		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
-		exit(EXIT_FAILURE);
-	}
-
-	log_printf(LOG_INFO,"Socket connected successfully\n");
-
-	int isDownloadedOrInvalid = downloadFile(metaFileInfo,sockfd);
-
-	close(sockfd);
+int startClient(struct torrent_t *metaFileInfo){
+	int isDownloadedOrInvalid = downloadFile(metaFileInfo);
 
 	return isDownloadedOrInvalid;
 }
@@ -244,7 +251,7 @@ int main(int argc, char **argv) {
 
 	else {
 		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1]);
-		int fileDownloaded =createClient(&metaFileInfo);
+		int fileDownloaded =startClient(&metaFileInfo);
 
 		if (fileDownloaded == 0){
 			log_printf(LOG_INFO, "File downloaded :)");

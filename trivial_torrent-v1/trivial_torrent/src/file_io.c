@@ -82,7 +82,7 @@ int skip_comment_lines(FILE * const f) {
  * Reads hexadecimal hashes from files.
  * @param hash is where the hash is stored.
  * @param f is an input FILE stream.
- * @return 0 on success, -1 otherwise.
+ * @return 0 on success, -1 otherwise (and errno is set).
  */
 static
 int read_hash_from_file(sha256_hash_t hash, FILE * const f) {
@@ -92,7 +92,7 @@ int read_hash_from_file(sha256_hash_t hash, FILE * const f) {
 	const int r = fscanf(f, "%64[0-9A-Fa-f] ", buffer);
 
 	if (r != 1) {
-		if (feof(f)) {
+		if (! ferror(f)) {
 			errno = EBADMSG;
 		}
 
@@ -149,7 +149,7 @@ int create_torrent_from_metainfo_file (const char * const metainfo_file_name, st
 	}
 
 	if (fscanf(f, "%" SCNu64 " ", &torrent->downloaded_file_size) != 1) {
-		if (feof(f)) {
+		if (! ferror(f)) {
 			errno = EBADMSG;
 		}
 
@@ -163,7 +163,7 @@ int create_torrent_from_metainfo_file (const char * const metainfo_file_name, st
 	}
 
 	if (fscanf(f, "%" SCNu64 " ", &torrent->peer_count) != 1) {
-		if (feof(f)) {
+		if (! ferror(f)) {
 			errno = EBADMSG;
 		}
 
@@ -308,14 +308,14 @@ int create_torrent_from_metainfo_file (const char * const metainfo_file_name, st
 		torrent->peers[i].peer_address[2] = (uint8_t) (addr >>  8);
 		torrent->peers[i].peer_address[3] = (uint8_t) (addr >>  0);
 
-		torrent->peers[i].peer_port = ntohs(addr_in->sin_port);
+		torrent->peers[i].peer_port = addr_in->sin_port;
 
 		log_printf(LOG_DEBUG, "\t... to %d.%d.%d.%d %d",
 				torrent->peers[i].peer_address[0],
 				torrent->peers[i].peer_address[1],
 				torrent->peers[i].peer_address[2],
 				torrent->peers[i].peer_address[3],
-				torrent->peers[i].peer_port);
+				ntohs(torrent->peers[i].peer_port));
 
 		freeaddrinfo(result);
 	}

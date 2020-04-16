@@ -9,17 +9,21 @@
 #include <inttypes.h>
 #include <unistd.h>
 #include <string.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/poll.h>
 
 // TODO: hey!? what is this?
 
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
-void createServer(char *portCandidate);
+int checkValidPort(char *portCandidate);
+int createServer(int portToUse);
 int startClient(struct torrent_t *metaInfoFile);
-struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer);
+struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
 int downloadFile(struct torrent_t *metaFileInfo);
-int createServerConnection(struct torrent_t *metaFileInfo,int blockNumber);
+int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumber);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -31,22 +35,85 @@ enum { RAW_MESSAGE_SIZE = 13,
 	RAW_RESPONSE_SIZE = 13
 };
 
-void createServer(char *portCandidate ) {
+int checkValidPort(char *portCandidate) {
 	int port = atoi(portCandidate);
 
 	if (port == 0) {
 		log_printf(LOG_INFO,"error: the %s is not a valid port\n",portCandidate);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	else if (port >= 1 && port <= 1024) {
 		log_printf(LOG_INFO, "error: the port %d is a reserved port\n",port);
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	log_printf(LOG_INFO,"Server mode (port %d)\n",port);
+	return port;
+}
 
-	//TODO: server stuff
+int createServer(int portToUse){
+
+	int sockfd;
+	struct sockaddr_in servaddr;
+
+	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+			log_printf(LOG_INFO, "error opening socket. Exiting...\n");
+			return -1;
+	}
+
+	log_printf(LOG_INFO,"Socket created successfully\n");
+	memset((char *)&servaddr,0,sizeof(servaddr));
+
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){
+		log_printf(LOG_INFO, "error fcntl 1\n");
+		return -1;
+	}
+
+	servaddr.sin_family = AF_INET;
+	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	servaddr.sin_port = htons((uint16_t)portToUse);
+
+	if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) == -1){
+		log_printf(LOG_INFO, "error binding...\n");
+
+		if (errno == 98){
+			log_printf(LOG_INFO,"address already in use\n");
+		}
+
+		return -1;
+	}
+
+	log_printf(LOG_INFO, "Binding success!\n");
+
+	if ( listen(sockfd, 100) == -1){
+		log_printf(LOG_INFO, "error listening...\n");
+
+		return -1;
+	}
+	log_printf(LOG_INFO, "Listen to connections now\n");
+	//poll(__fds, __nfds, __timeout), __nfds, __timeout)
+
+	while(1){
+		int prueba = accept(sockfd, NULL, NULL);
+
+		if (prueba == -1){
+			if (errno == EWOULDBLOCK || errno == EAGAIN){
+				sleep(1);
+			}
+			else {
+				log_printf(LOG_INFO, "error while arriving connections\n");
+				return -1;
+			}
+		}
+
+		char prueba2[] = "er Huevo\n";
+		send(prueba,prueba2,sizeof(prueba2),0);
+		close(prueba);
+		sleep(1);
+	}
+
+	return 0;
 }
 
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
@@ -79,7 +146,7 @@ int checkResponseHeader(char * serverResponse,uint64_t blockNumber){
 	return 0;
 }
 
-int createServerConnection(struct torrent_t *metaFileInfo,int blockNumber) {
+int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumber) {
 	int sockfd;
 	struct sockaddr_in servaddr;
 
@@ -108,7 +175,7 @@ int createServerConnection(struct torrent_t *metaFileInfo,int blockNumber) {
 int downloadFile(struct torrent_t *metaFileInfo){
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
-		int sockfd = createServerConnection(metaFileInfo, (int)blockNumber);
+		int sockfd = createClientToServerConnection(metaFileInfo, (int)blockNumber);
 
 		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
@@ -184,11 +251,24 @@ int downloadFile(struct torrent_t *metaFileInfo){
 	return 0;
 }
 
-struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
+struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer){
 	char * extension = strtok(metaFileToDownloadFromServer,".");
 	char leftPartOfName[1024] = {0};
 	strcpy(leftPartOfName,extension);
-	strcat(leftPartOfName,".txt");
+
+	if (isServer){
+		FILE * fileToCheck;
+
+		if ((fileToCheck = fopen(leftPartOfName, "r"))){
+			fclose(fileToCheck);
+		}
+
+		else {
+			log_printf(LOG_INFO, "file %s to use not found\n",leftPartOfName);
+			exit(EXIT_FAILURE);
+		}
+	}
+
 	extension = strtok(NULL,".");
 	metaFileToDownloadFromServer = strcat(metaFileToDownloadFromServer,".ttorrent");
 
@@ -208,6 +288,7 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer){
 
 	if (creationSuccess == -1 ){
 		log_printf(LOG_INFO, "error parsing file");
+		exit(EXIT_FAILURE);
 	}
 
 	return metaFileInfo;
@@ -245,13 +326,20 @@ int main(int argc, char **argv) {
 		}
 
 		if (foundServerPortFlag == 1) {
-			createServer(argv[i + 1]);
+			int port;
+
+			if ((port = checkValidPort(argv[i + 1])) == -1){
+				exit(EXIT_FAILURE);
+			}
+
+			//struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
+			createServer(port);
 		}
 	}
 
 	else {
-		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1]);
-		int fileDownloaded =startClient(&metaFileInfo);
+		struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],0);
+		int fileDownloaded = startClient(&metaFileInfo);
 
 		if (fileDownloaded == 0){
 			log_printf(LOG_INFO, "File downloaded :)");

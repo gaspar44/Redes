@@ -19,6 +19,7 @@
 
 int checkValidPort(char *portCandidate);
 int createServer(int portToUse);
+//int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
 int startClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
@@ -52,6 +53,9 @@ int checkValidPort(char *portCandidate) {
 	return port;
 }
 
+//int allocateServerStructs(int sockFd,struct sockaddr_in servaddr) {
+//
+//}
 int createServer(int portToUse){
 
 	int sockfd;
@@ -65,14 +69,15 @@ int createServer(int portToUse){
 	log_printf(LOG_INFO,"Socket created successfully\n");
 	memset((char *)&servaddr,0,sizeof(servaddr));
 
-	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){
-		log_printf(LOG_INFO, "error fcntl 1\n");
-		return -1;
-	}
 
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	servaddr.sin_port = htons((uint16_t)portToUse);
+
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for stop address already in use after each test
+		log_printf(LOG_INFO, "error fcntl 1\n");
+		return -1;
+	}
 
 	if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) == -1){
 		log_printf(LOG_INFO, "error binding...\n");
@@ -91,26 +96,48 @@ int createServer(int portToUse){
 
 		return -1;
 	}
+
 	log_printf(LOG_INFO, "Listen to connections now\n");
-	//poll(__fds, __nfds, __timeout), __nfds, __timeout)
+
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for non-blocking
+		log_printf(LOG_INFO, "error fcntl 2\n");
+		return -1;
+	}
 
 	while(1){
-		int prueba = accept(sockfd, NULL, NULL);
+		int newFileDescriptorToUse = accept(sockfd, NULL, NULL);
+		printf("%d\n",newFileDescriptorToUse);
 
-		if (prueba == -1){
+		if (newFileDescriptorToUse == -1){
 			if (errno == EWOULDBLOCK || errno == EAGAIN){
 				sleep(1);
 			}
+
 			else {
 				log_printf(LOG_INFO, "error while arriving connections\n");
 				return -1;
 			}
 		}
 
+		char *serverRequestMessage = malloc(RAW_MESSAGE_SIZE);
+		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
+		//ssize_t bytesReadedFromClient = 0;
+
+		ssize_t bytesReadedFromClient = recv(newFileDescriptorToUse,serverRequestMessage,sizeof(serverRequestMessage),0);
+
+		if (bytesReadedFromClient == -1){
+			log_printf(LOG_INFO, ":(\n");
+		}
+
+		else {
+			printf("%ld\n", bytesReadedFromClient);
+		}
+
 		char prueba2[] = "er Huevo\n";
-		send(prueba,prueba2,sizeof(prueba2),0);
-		close(prueba);
-		sleep(1);
+		send(newFileDescriptorToUse,prueba2,sizeof(prueba2),0);
+		printf("%s\n",serverRequestMessage);
+		close(newFileDescriptorToUse);
+		free(serverRequestMessage);
 	}
 
 	return 0;

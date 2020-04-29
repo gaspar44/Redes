@@ -18,7 +18,7 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 int checkValidPort(char *portCandidate);
-int createServer(int portToUse,struct torrent_t metafileInfo);
+int createServer(int portToUse,struct torrent_t* metafileInfo);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
 uint64_t checkHeaderRecivedFromClient(char *clientRequest);
 
@@ -90,7 +90,7 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 		return 0;
 }
 
-int createServer(int portToUse,struct torrent_t metaFileInfo){
+int createServer(int portToUse,struct torrent_t *metaFileInfo){
 
 	int sockfd;
 	struct sockaddr_in servaddr;
@@ -115,7 +115,6 @@ int createServer(int portToUse,struct torrent_t metaFileInfo){
 
 	while(1){
 		int newFileDescriptorToUse = accept(sockfd, NULL, NULL);
-		printf("%d\n",newFileDescriptorToUse);
 
 		if (newFileDescriptorToUse == -1){
 			if (errno == EWOULDBLOCK || errno == EAGAIN){
@@ -148,7 +147,7 @@ int createServer(int portToUse,struct torrent_t metaFileInfo){
 			if (errorOrBlockToSend == 9999)
 				return -1;
 
-			if (errorOrBlockToSend > metaFileInfo.block_count) {
+			if (errorOrBlockToSend > metaFileInfo->block_count) {
 				char *responseBlock = (char*)malloc(RAW_MESSAGE_SIZE);
 				memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 				memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
@@ -161,12 +160,37 @@ int createServer(int portToUse,struct torrent_t metaFileInfo){
 
 				free(responseBlock);
 			}
+
+			else {
+				log_printf(LOG_INFO, "sending response to client...\nfd: %d\nrequestStatus: %ld\nblockToSendBack: %ld\n",newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
+				struct block_t blockToSend;
+				int getBlockError = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
+
+				if (getBlockError == -1){
+					log_printf(LOG_INFO, "Error loading block\n");
+					return -1;
+				}
+
+				char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE + blockToSend.size);
+				memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
+				memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_OK,sizeof(MSG_RESPONSE_OK));
+				memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
+				memcpy(responseBlock + RAW_RESPONSE_SIZE, blockToSend.data, blockToSend.size);
+
+				ssize_t bytesSendedToClient = send(newFileDescriptorToUse,responseBlock,sizeof(responseBlock),0);
+
+				if (bytesSendedToClient < 0){
+					log_printf(LOG_INFO, "error sending response...\n");
+				}
+
+				free(responseBlock);
+			}
 		}
 
 
-		char prueba2[] = "er Huevo\n";
-		send(newFileDescriptorToUse,prueba2,sizeof(prueba2),0);
-		printf("%s\n",serverRequestMessage);
+//		char prueba2[] = "er Huevo\n";
+//		send(newFileDescriptorToUse,prueba2,sizeof(prueba2),0);
+		//printf("%s\n",serverRequestMessage);
 
 		close(newFileDescriptorToUse);
 		free(serverRequestMessage);
@@ -193,7 +217,7 @@ uint64_t checkHeaderRecivedFromClient(char *clientRequest){
 		}
 
 		log_printf(LOG_INFO, "Valid header!");
-		printf("%ld\n",*requestBlockNumer);
+		log_printf(LOG_INFO, "recived from client:\nMagicNumber:OK\nrequestMessage: %ld\nblock: %d\n",*requestMessage,*requestBlockNumer);
 
 		return *requestBlockNumer;
 }
@@ -278,6 +302,7 @@ int downloadFile(struct torrent_t *metaFileInfo){
 
 		while (1) {
 			ssize_t partialReadedBytes = recv(sockfd,serverResponse,RAW_RESPONSE_SIZE + block.size,0);
+			log_printf(LOG_INFO,"readed Bytes: %ld\n",partialReadedBytes);
 
 			if (partialReadedBytes < 0) {
 				log_printf(LOG_INFO, "error reading from server");
@@ -415,7 +440,7 @@ int main(int argc, char **argv) {
 			}
 
 			struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
-			createServer(port,metaFileInfo);
+			createServer(port,&metaFileInfo);
 		}
 	}
 

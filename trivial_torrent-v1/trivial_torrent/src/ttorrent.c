@@ -18,8 +18,9 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 int checkValidPort(char *portCandidate);
-int createServer(int portToUse);
-//int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
+int createServer(int portToUse,struct torrent_t metafileInfo);
+int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
+
 int startClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer);
 int checkResponseHeader(char * serverResponse,uint64_t blockNumber);
@@ -53,10 +54,41 @@ int checkValidPort(char *portCandidate) {
 	return port;
 }
 
-//int allocateServerStructs(int sockFd,struct sockaddr_in servaddr) {
-//
-//}
-int createServer(int portToUse){
+int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
+	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for stop address already in use after each test
+			log_printf(LOG_INFO, "error fcntl 1\n");
+			return -1;
+		}
+
+		if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) == -1){
+			log_printf(LOG_INFO, "error binding...\n");
+
+			if (errno == 98){
+				log_printf(LOG_INFO,"address already in use\n");
+			}
+
+			return -1;
+		}
+
+		log_printf(LOG_INFO, "Binding success!\n");
+
+		if ( listen(sockfd, 100) == -1){
+			log_printf(LOG_INFO, "error listening...\n");
+
+			return -1;
+		}
+
+		log_printf(LOG_INFO, "Listen to connections now\n");
+
+		if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for non-blocking
+			log_printf(LOG_INFO, "error fcntl 2\n");
+			return -1;
+		}
+
+		return 0;
+}
+
+int createServer(int portToUse,struct torrent_t metaFileInfo){
 
 	int sockfd;
 	struct sockaddr_in servaddr;
@@ -74,35 +106,10 @@ int createServer(int portToUse){
 	servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
 	servaddr.sin_port = htons((uint16_t)portToUse);
 
-	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for stop address already in use after each test
-		log_printf(LOG_INFO, "error fcntl 1\n");
+	int err = allocateServerStructs(sockfd,servaddr);
+
+	if (err == -1)
 		return -1;
-	}
-
-	if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) == -1){
-		log_printf(LOG_INFO, "error binding...\n");
-
-		if (errno == 98){
-			log_printf(LOG_INFO,"address already in use\n");
-		}
-
-		return -1;
-	}
-
-	log_printf(LOG_INFO, "Binding success!\n");
-
-	if ( listen(sockfd, 100) == -1){
-		log_printf(LOG_INFO, "error listening...\n");
-
-		return -1;
-	}
-
-	log_printf(LOG_INFO, "Listen to connections now\n");
-
-	if (fcntl(sockfd, F_SETFL, O_NONBLOCK | O_CLOEXEC) == -1){ // Necessary for non-blocking
-		log_printf(LOG_INFO, "error fcntl 2\n");
-		return -1;
-	}
 
 	while(1){
 		int newFileDescriptorToUse = accept(sockfd, NULL, NULL);
@@ -119,18 +126,23 @@ int createServer(int portToUse){
 			}
 		}
 
-		char *serverRequestMessage = malloc(RAW_MESSAGE_SIZE);
+		char *serverRequestMessage = (char*)malloc(RAW_MESSAGE_SIZE);
 		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
-		//ssize_t bytesReadedFromClient = 0;
 
-		ssize_t bytesReadedFromClient = recv(newFileDescriptorToUse,serverRequestMessage,sizeof(serverRequestMessage),0);
+		ssize_t totalBytesReadedFromClient = 0;
 
-		if (bytesReadedFromClient == -1){
-			log_printf(LOG_INFO, ":(\n");
-		}
+		while (newFileDescriptorToUse != -1 && totalBytesReadedFromClient != RAW_MESSAGE_SIZE){
+			ssize_t bytesReadedFromClient = recv(newFileDescriptorToUse,serverRequestMessage + totalBytesReadedFromClient,RAW_MESSAGE_SIZE,0);
 
-		else {
-			printf("%ld\n", bytesReadedFromClient);
+			if (bytesReadedFromClient == -1){
+				if (errno == 9)
+					log_printf(LOG_INFO,"bad file descriptor...\n");
+
+				sleep(1);
+			}
+
+			else
+				totalBytesReadedFromClient = totalBytesReadedFromClient + bytesReadedFromClient;
 		}
 
 		char prueba2[] = "er Huevo\n";
@@ -359,8 +371,8 @@ int main(int argc, char **argv) {
 				exit(EXIT_FAILURE);
 			}
 
-			//struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
-			createServer(port);
+			struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
+			createServer(port,metaFileInfo);
 		}
 	}
 

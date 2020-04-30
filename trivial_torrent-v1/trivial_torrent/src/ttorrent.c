@@ -251,7 +251,7 @@ int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t by
 		ssize_t bytesSendedBack = send(socketFileDescriptor,blockToSend,bytesToSendBack,0);
 
 		if (bytesSendedBack < 0){
-			if (errno == EPIPE || errno == 104)
+			if (errno == EPIPE || errno == ECONNRESET)
 				return 0;
 
 			log_printf(LOG_INFO, "error sending response: %d\n",errno);

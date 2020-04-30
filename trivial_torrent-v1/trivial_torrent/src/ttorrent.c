@@ -96,7 +96,8 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 }
 
 void pass(int signal){
-	log_printf(LOG_INFO, "broken pipe from client... Ignoring it %d\n",signal);
+	(void) signal;
+	log_printf(LOG_INFO, "broken pipe from client... Ignoring it\n");
 
 }
 

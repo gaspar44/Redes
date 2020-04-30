@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/poll.h>
+#include <signal.h>
 
 // TODO: hey!? what is this?
 
@@ -19,6 +20,7 @@
 
 int checkValidPort(char *portCandidate);
 int createServer(int portToUse,struct torrent_t* metafileInfo);
+void pass(int signal);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
 void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage);
 uint64_t checkHeaderRecivedFromClient(char *clientRequest);
@@ -93,6 +95,11 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 		return 0;
 }
 
+void pass(int signal){
+	log_printf(LOG_INFO, "broken pipe from client... Ignoring it %d\n",signal);
+
+}
+
 int createServer(int portToUse,struct torrent_t *metaFileInfo){
 
 	int sockfd;
@@ -160,7 +167,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 			}
 
 			else {
-				log_printf(LOG_INFO, "sending response to client...\nfd: %d\nrequestStatus: %ld\nblockToSendBack: %ld\n",newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
+				log_printf(LOG_INFO, "sending response to client...\nfd: %d\nrequest status: %ld\nblock to send back: %ld\n",newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
 				struct block_t blockToSend;
 				int isLoaded = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
 
@@ -202,8 +209,11 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 	while (totalBytesReadedFromClient != RAW_MESSAGE_SIZE){
 		ssize_t bytesReadedFromClient = recv(socketFileDescriptor,serverRequestMessage + totalBytesReadedFromClient,RAW_MESSAGE_SIZE,0);
 
-		if (bytesReadedFromClient == -1)
+		if (bytesReadedFromClient < 0){
+			if (errno == EPIPE)
+				return;
 			sleep(1);
+		}
 		else
 			totalBytesReadedFromClient = totalBytesReadedFromClient + bytesReadedFromClient;
 	}
@@ -474,7 +484,14 @@ int main(int argc, char **argv) {
 			}
 
 			struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
-			createServer(port,&metaFileInfo);
+			signal(SIGPIPE, pass);
+			int exited = createServer(port,&metaFileInfo);
+			destroy_torrent(&metaFileInfo);
+
+			if (exited == -1) {
+				log_printf(LOG_INFO, "something terrible happend :(");
+				exit(EXIT_FAILURE);
+			}
 		}
 	}
 

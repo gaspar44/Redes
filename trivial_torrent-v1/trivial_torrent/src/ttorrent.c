@@ -22,7 +22,6 @@
 
 int checkValidPort(char *portCandidate);
 int createServer(int portToUse,struct torrent_t* metafileInfo);
-void pass(int signal);
 void waitForChildProccesses(int signal);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo);
@@ -93,11 +92,6 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 		return 0;
 }
 
-void pass(int signal){
-	(void) signal;
-	log_printf(LOG_INFO, "broken pipe from client... Ignoring it\n");
-}
-
 void waitForChildProccesses(int signal){
 	log_printf(LOG_INFO, "signal: %d arrived. Cleaning forked childs\n",signal);
 
@@ -108,7 +102,6 @@ void waitForChildProccesses(int signal){
 		if (pidToExit == 0 || pidToExit == -1)
 			break;
 	}
-
 }
 
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
@@ -134,12 +127,8 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 			return EXIT_FAILURE;
 		}
 
-		else {
-			log_printf(LOG_INFO, "blocked send back to client correctly\n");
-		}
-
+		log_printf(LOG_INFO, "blocked not available\n");
 		free(responseBlock);
-
 	}
 
 	else {
@@ -166,10 +155,7 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 			return EXIT_FAILURE;
 		}
 
-		else {
-			log_printf(LOG_INFO, "blocked send back to client correctly\n");
-		}
-
+		log_printf(LOG_INFO, "blocked send back to client correctly\n");
 		free(responseBlock);
 	}
 
@@ -201,8 +187,9 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 		return -1;
 
 	while(1){
+		signal(SIGPIPE, SIG_IGN);
+		signal(SIGCHLD,waitForChildProccesses);
 		int newFileDescriptorToUse = accept(sockfd, NULL, NULL);
-
 		if (newFileDescriptorToUse == -1){
 			if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR){
 				sleep(1);
@@ -227,6 +214,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 				printf("forked client ;). Closing unnecessary stuff\n");
 				close(sockfd);
 				int exitClientStatus = forkProcess(newFileDescriptorToUse,metaFileInfo);
+				destroy_torrent(metaFileInfo);
 				close(newFileDescriptorToUse);
 				exit(exitClientStatus);
 			}
@@ -361,7 +349,6 @@ int downloadFile(struct torrent_t *metaFileInfo){
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
 		int sockfd = createClientToServerConnection(metaFileInfo, (int)blockNumber);
-
 		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &blockNumber,sizeof(blockNumber));
@@ -519,8 +506,6 @@ int main(int argc, char **argv) {
 			}
 
 			struct torrent_t metaFileInfo = getMetaFileInfo(argv[argc - 1],1);
-			signal(SIGPIPE, pass);
-			signal(SIGCHLD,waitForChildProccesses);
 			int exited = createServer(port,&metaFileInfo);
 			destroy_torrent(&metaFileInfo);
 

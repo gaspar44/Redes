@@ -97,7 +97,7 @@ void waitForChildProccesses(int signal){
 
 	while(1){
 		int status;
-		pid_t pidToExit = waitpid(-1,&status,1);
+		pid_t pidToExit = waitpid(-1,&status,WNOHANG); // See man wait for details
 
 		if (pidToExit == 0 || pidToExit == -1)
 			break;

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/poll.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // TODO: hey!? what is this?
@@ -24,7 +25,7 @@ int createServer(int portToUse,struct torrent_t* metafileInfo);
 void pass(int signal);
 void waitForChildProccesses(int signal);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
-int forkProcess(int newFileDescriptor);
+int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo);
 void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage);
 uint64_t checkHeaderRecivedFromClient(char *clientRequest);
 int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t bytesToSendBack);
@@ -100,10 +101,80 @@ void pass(int signal){
 void waitForChildProccesses(int signal){
 	log_printf(LOG_INFO, "signal: %d arrived. Cleaning forked childs\n",signal);
 
+	while(1){
+		int status;
+		pid_t pidToExit = waitpid(-1,&status,1);
+
+		if (pidToExit == 0 || pidToExit == -1)
+			break;
+	}
+
 }
 
-int forkProcess(int newFileDescriptor,struct torrent_t *metaFileInfo){
+int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
+	char *serverRequestMessage = (char*)malloc(RAW_MESSAGE_SIZE);
+	memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
 
+	recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
+	uint64_t errorOrBlockToSend = checkHeaderRecivedFromClient(serverRequestMessage);
+
+	if (errorOrBlockToSend == ERROR_BLOCK)
+		return EXIT_FAILURE;
+
+	if (errorOrBlockToSend > metaFileInfo->block_count) {
+		char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE);
+		memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
+
+		int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE);
+
+		if (isSended == -1){
+			log_printf(LOG_INFO, "time out reached while sending back\n");
+			return EXIT_FAILURE;
+		}
+
+		else {
+			log_printf(LOG_INFO, "blocked send back to client correctly\n");
+		}
+
+		free(responseBlock);
+
+	}
+
+	else {
+		log_printf(LOG_INFO, "sending response to client...\nfd: %d\nrequest status: %ld\nblock to send back: %ld\n",newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
+		struct block_t blockToSend;
+		int isLoaded = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
+
+		if (isLoaded == -1){
+			log_printf(LOG_INFO, "Error loading block\n");
+			return EXIT_FAILURE;
+		}
+
+		char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE + blockToSend.size);
+		uint32_t prueba = htonl(MAGIC_NUMBER);
+		memcpy(responseBlock,&prueba , sizeof(prueba));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_OK,sizeof(MSG_RESPONSE_OK));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
+		memcpy(responseBlock + RAW_RESPONSE_SIZE, blockToSend.data, blockToSend.size);
+
+		int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE + blockToSend.size);
+
+		if (isSended == -1){
+			log_printf(LOG_INFO, "time out reached while sending back\n");
+			return EXIT_FAILURE;
+		}
+
+		else {
+			log_printf(LOG_INFO, "blocked send back to client correctly\n");
+		}
+
+		free(responseBlock);
+	}
+
+	free(serverRequestMessage);
+	return EXIT_SUCCESS;
 }
 
 int createServer(int portToUse,struct torrent_t *metaFileInfo){
@@ -144,7 +215,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 			}
 		}
 
-		if (newFileDescriptorToUse != -1){
+		else {
 			pid_t forkedID;
 
 			if ( (forkedID = fork()) < 0){
@@ -156,69 +227,11 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 				printf("forked client ;). Closing unnecessary stuff\n");
 				close(sockfd);
 				int exitClientStatus = forkProcess(newFileDescriptorToUse,metaFileInfo);
-				char *serverRequestMessage = (char*)malloc(RAW_MESSAGE_SIZE);
-				memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
-
-				recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
-				uint64_t errorOrBlockToSend = checkHeaderRecivedFromClient(serverRequestMessage);
-
-				if (errorOrBlockToSend == ERROR_BLOCK)
-					return -1;
-
-				if (errorOrBlockToSend > metaFileInfo->block_count) {
-					char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE);
-					memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
-					memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
-					memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
-
-					int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE);
-
-					if (isSended == -1){
-						log_printf(LOG_INFO, "time out reached while sending back\n");
-					}
-
-					else {
-						log_printf(LOG_INFO, "blocked send back to client correctly\n");
-					}
-
-					free(responseBlock);
-				}
-
-				else {
-					log_printf(LOG_INFO, "sending response to client...\nfd: %d\nrequest status: %ld\nblock to send back: %ld\n",newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
-					struct block_t blockToSend;
-					int isLoaded = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
-
-					if (isLoaded == -1){
-						log_printf(LOG_INFO, "Error loading block\n");
-						return -1;
-					}
-
-					char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE + blockToSend.size);
-					uint32_t prueba = htonl(MAGIC_NUMBER);
-					memcpy(responseBlock,&prueba , sizeof(prueba));
-					memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_OK,sizeof(MSG_RESPONSE_OK));
-					memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
-					memcpy(responseBlock + RAW_RESPONSE_SIZE, blockToSend.data, blockToSend.size);
-
-					int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE + blockToSend.size);
-
-					if (isSended == -1){
-						log_printf(LOG_INFO, "time out reached while sending back\n");
-					}
-
-					else {
-						log_printf(LOG_INFO, "blocked send back to client correctly\n");
-					}
-
-					free(responseBlock);
-				}
-
-				free(serverRequestMessage);
 				close(newFileDescriptorToUse);
-				exit(EXIT_SUCCESS);
+				exit(exitClientStatus);
 			}
 		}
+
 		close(newFileDescriptorToUse);
 	}
 

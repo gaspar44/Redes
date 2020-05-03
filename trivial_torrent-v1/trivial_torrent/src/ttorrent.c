@@ -156,7 +156,6 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 			}
 
 			free(responseBlock);
-
 			if (errorOrBlockToSend == metaFileInfo->block_count - 1)
 				break;
 		}
@@ -233,6 +232,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 
 void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage) {
 	ssize_t totalBytesReadedFromClient = 0;
+	int requestTimeOut = 0;
 	while (totalBytesReadedFromClient != RAW_MESSAGE_SIZE){
 		ssize_t bytesReadedFromClient = recv(socketFileDescriptor,serverRequestMessage + totalBytesReadedFromClient,RAW_MESSAGE_SIZE,0);
 
@@ -241,6 +241,14 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 				return;
 			sleep(1);
 		}
+
+		else if (bytesReadedFromClient == 0){
+			requestTimeOut = requestTimeOut + 1;
+			sleep(1);
+			if (requestTimeOut == 30)
+				return;
+		}
+
 		else{
 			log_printf(LOG_INFO,"readed Bytes: %ld\n",bytesReadedFromClient);
 			totalBytesReadedFromClient = totalBytesReadedFromClient + bytesReadedFromClient;
@@ -251,24 +259,24 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 
 uint64_t checkHeaderRecivedFromClient(char *clientRequest){
 	log_printf(LOG_INFO,"checking header...");
-		uint32_t *requestMagicNumber = (uint32_t *) clientRequest;
-		uint8_t *requestMessage = (uint8_t *)(clientRequest + sizeof(MAGIC_NUMBER));
-		uint64_t *requestBlockNumer = (uint64_t *) (clientRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK));
-		log_printf(LOG_INFO, "recived from client:\nMagicNumber:0x%08X\nrequestMessage: %ld\nblock: %d\n",*requestMagicNumber,*requestMessage,*requestBlockNumer);
+	uint32_t *requestMagicNumber = (uint32_t *) clientRequest;
+	uint8_t *requestMessage = (uint8_t *)(clientRequest + sizeof(MAGIC_NUMBER));
+	uint64_t *requestBlockNumer = (uint64_t *) (clientRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK));
+	log_printf(LOG_INFO, "recived from client:\nMagicNumber:0x%08X\nrequestMessage: %ld\nblock: %d\n",*requestMagicNumber,*requestMessage,*requestBlockNumer);
 
-		if (*requestMessage != 0){
-			log_printf(LOG_INFO, "invalid message from client\n");
-			return ERROR_BLOCK;
-		}
+	if (*requestMessage != 0){
+		log_printf(LOG_INFO, "invalid message from client\n");
+		return ERROR_BLOCK;
+	}
 
-		if (*requestMagicNumber != MAGIC_NUMBER){
-			log_printf(LOG_INFO, "invalid Magic number from client");
-			return ERROR_BLOCK;
-		}
+	if (*requestMagicNumber != MAGIC_NUMBER){
+		log_printf(LOG_INFO, "invalid Magic number from client");
+		return ERROR_BLOCK;
+	}
 
-		log_printf(LOG_INFO, "Valid header!");
+	log_printf(LOG_INFO, "Valid header!");
 
-		return *requestBlockNumer;
+	return *requestBlockNumer;
 }
 
 int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t bytesToSendBack) {

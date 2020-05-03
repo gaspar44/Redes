@@ -93,7 +93,7 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 
 void waitForChildProccesses(int signal){
 	(void) signal;
-	//log_printf(LOG_DEBUG, "Signal %d recived\n",signal);
+	log_printf(LOG_DEBUG, "Signal %d recived\n",signal);
 	pid_t pidToExit;
 	int status;
 
@@ -192,6 +192,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 		log_printf(LOG_INFO, "Listen to connections now\n");
 		signal(SIGPIPE, SIG_IGN);
 		signal(SIGCHLD,waitForChildProccesses);
+
 		int newFileDescriptorToUse = accept(sockfd, NULL, NULL);
 		if (newFileDescriptorToUse == -1){
 			if (errno == EWOULDBLOCK || errno == EAGAIN || errno == EINTR){

@@ -9,6 +9,8 @@ all:
 	$(CC) $(CFLAGS) src/pong.c -o bin/pong
 	
 	$(CC) $(CFLAGS) src/ttorrent.c src/file_io.c src/logger.c -o bin/ttorrent -lssl -lcrypto
+	
+	$(CC) $(CFLAGS) src/test.c src/file_io.c src/logger.c -o bin/tests -lpthread -lssl -lcrypto
 
 clean:
-	rm -f bin/pong bin/ttorrent
+	rm -f bin/pong bin/ttorrent bin/tests

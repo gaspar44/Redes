@@ -20,18 +20,17 @@
 // https://en.wikipedia.org/wiki/Magic_number_(programming)#In_protocols
 
 int checkValidPort(char *portCandidate);
-int createServer(int portToUse,struct torrent_t* metafileInfo);
-void waitForChildProccesses(int signal);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
+int createServer(int portToUse,struct torrent_t* metafileInfo);
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo);
 void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage);
-uint64_t checkHeaderRecivedFromClient(char *clientRequest);
+uint64_t checkHeaderReceivedFromClient(char *clientRequest);
 int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t bytesToSendBack);
+void waitForChildProccesses(int signal);
 
-
-int startClient(struct torrent_t *metaInfoFile);
 struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer);
-int checkHeaderRecivedFromServer(char * serverResponse,uint64_t blockNumber);
+int startClient(struct torrent_t *metaInfoFile);
+int checkHeaderReceivedFromServer(char * serverResponse,uint64_t blockNumber);
 int downloadFile(struct torrent_t *metaFileInfo);
 int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumber);
 
@@ -82,7 +81,7 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 
 		log_printf(LOG_INFO, "Binding success!\n");
 
-		if ( listen(sockfd, 100) == -1){
+		if ( listen(sockfd, 10) == -1){
 			log_printf(LOG_INFO, "error listening...\n");
 
 			return -1;
@@ -93,7 +92,7 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 
 void waitForChildProccesses(int signal){
 	(void) signal;
-	log_printf(LOG_DEBUG, "Signal %d recived\n",signal);
+	log_printf(LOG_DEBUG, "Signal %d received\n",signal);
 	pid_t pidToExit;
 	int status;
 
@@ -108,7 +107,7 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 	while(1){
 		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
 		recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
-		uint64_t errorOrBlockToSend = checkHeaderRecivedFromClient(serverRequestMessage);
+		uint64_t errorOrBlockToSend = checkHeaderReceivedFromClient(serverRequestMessage);
 
 		if (errorOrBlockToSend == ERROR_BLOCK)
 			return EXIT_FAILURE;
@@ -213,7 +212,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 			}
 
 			else if (forkedID == 0){
-				printf("forked client ;). Closing unnecessary stuff\n");
+				log_printf(LOG_INFO,"forked client ;). Closing unnecessary stuff\n");
 				close(sockfd);
 				int exitClientStatus = forkProcess(newFileDescriptorToUse,metaFileInfo);
 				destroy_torrent(metaFileInfo);
@@ -255,12 +254,12 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 	}
 }
 
-uint64_t checkHeaderRecivedFromClient(char *clientRequest){
+uint64_t checkHeaderReceivedFromClient(char *clientRequest){
 	log_printf(LOG_INFO,"checking header...");
 	uint32_t *requestMagicNumber = (uint32_t *) clientRequest;
 	uint8_t *requestMessage = (uint8_t *)(clientRequest + sizeof(MAGIC_NUMBER));
 	uint64_t *requestBlockNumer = (uint64_t *) (clientRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_RESPONSE_OK));
-	log_printf(LOG_INFO, "recived from client:\nMagicNumber:0x%08X\nrequestMessage: %ld\nblock: %d\n",*requestMagicNumber,*requestMessage,*requestBlockNumer);
+	log_printf(LOG_INFO, "Received from client:\nMagicNumber:0x%08X\nrequestMessage: %ld\nblock: %d\n",*requestMagicNumber,*requestMessage,*requestBlockNumer);
 
 	if (*requestMessage != 0){
 		log_printf(LOG_INFO, "invalid message from client\n");
@@ -300,7 +299,7 @@ int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t by
 	return timeOut == 30 ? -1 : 0;
 }
 
-int checkHeaderRecivedFromServer(char * serverResponse,uint64_t blockNumber){
+int checkHeaderReceivedFromServer(char * serverResponse,uint64_t blockNumber){
 	log_printf(LOG_INFO,"checking header...");
 	uint32_t *responseMagicNumber = (uint32_t *) serverResponse;
 	uint8_t *responseMessage = (uint8_t *)(serverResponse + sizeof(MAGIC_NUMBER));
@@ -392,7 +391,7 @@ int downloadFile(struct torrent_t *metaFileInfo){
 				}
 			}
 		}
-			int validHeader = checkHeaderRecivedFromServer(serverResponse,blockNumber);
+			int validHeader = checkHeaderReceivedFromServer(serverResponse,blockNumber);
 
 			if (validHeader == -1){
 				log_printf(LOG_INFO, "error in header");
@@ -478,6 +477,7 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer
 	struct torrent_t metaFileInfo;
 
 	int creationSuccess = create_torrent_from_metainfo_file(fileBeforeStrktok,&metaFileInfo,metaFileToDownloadFromServer);
+	free(fileBeforeStrktok);
 
 	if (creationSuccess == -1 ){
 		log_printf(LOG_INFO, "error parsing file");

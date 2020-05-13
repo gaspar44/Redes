@@ -21,6 +21,16 @@ int main(int argc, char **argv) {
 
 	else if (argc == 4){
 		int foundServerPortFlag = 0;
+		int flagParsed = 0;
+	    while ((flagParsed = getopt(argc, argv, "l")) != -1) {
+	        switch (flagParsed) {
+	        case 'l': foundServerPortFlag = 1; break;
+	        default:
+	        	log_printf(LOG_INFO,"ERROR: Usage is: ttorrent [-l port] file.ttorrent\n");
+	            exit(EXIT_FAILURE);
+	        }
+	    }
+
 		int i;
 		for (i = 1; i < argc;i++){
 

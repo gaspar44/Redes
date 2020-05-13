@@ -10,7 +10,9 @@ all:
 	
 	$(CC) $(CFLAGS) src/ttorrent.c src/file_io.c src/logger.c -o bin/ttorrent -lssl -lcrypto
 	
-	$(CC) $(CFLAGS) src/unit_test.c src/file_io.c src/logger.c -o bin/unit_tests -lpthread -lssl -lcrypto
+	$(CC) $(CFLAGS) src/unit_test.c src/file_io.c src/logger.c -o bin/unit_tests -lssl -lcrypto
+	
+	$(CC) $(CFLAGS) src/func_test.c src/file_io.c src/logger.c -o bin/func_tests -lpthread -lssl -lcrypto
 
 clean:
-	rm -f bin/pong bin/ttorrent bin/unit_tests
+	rm -f bin/pong bin/ttorrent bin/unit_tests bin/func_test

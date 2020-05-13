@@ -19,8 +19,6 @@ void checkHeaderReceivedFromServerNotAvaliableBlockTest(char *supressWarning);
 void checkHeaderReceivedFromServerIncorrectBlockTestError(char *supressWarning);
 void checkHeaderReceivedFromServerInvalidMagicNumberTestError(char *supressWarning);
 
-
-
 void checkValidPortTest(char *supressWarning) {
 	(void) supressWarning;
 	char *validPort = "1025";

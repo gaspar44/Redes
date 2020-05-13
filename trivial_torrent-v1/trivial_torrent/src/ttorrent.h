@@ -40,6 +40,7 @@ static const uint8_t MSG_REQUEST = 0;
 static const uint8_t MSG_RESPONSE_OK = 1;
 static const uint8_t MSG_RESPONSE_NA = 2;
 static const uint64_t ERROR_BLOCK = 9999;
+static const int MAX_TIME_OUT = 30;
 
 enum { RAW_MESSAGE_SIZE = 13,
 	RAW_RESPONSE_SIZE = 13
@@ -48,19 +49,19 @@ enum { RAW_MESSAGE_SIZE = 13,
 int checkValidPort(char *portCandidate) {
 	int port = atoi(portCandidate);
 
-	if (port == 0) {
+	if (port < 0) {
 		log_printf(LOG_INFO,"error: the %s is not a valid port\n",portCandidate);
 		return -1;
 	}
 
-	else if (port >= 1 && port <= 1024) {
+	else if (port >= 0 && port <= 1024) {
 		log_printf(LOG_INFO, "error: the port %d is a reserved port\n",port);
 		return -1;
 	}
 
 	log_printf(LOG_INFO,"Server mode (port %d)\n",port);
 
-	return port < 0 ? -1 : port;
+	return port;
 }
 
 int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
@@ -93,11 +94,13 @@ int allocateServerStructs(int sockfd,struct sockaddr_in servaddr) {
 void waitForChildProccesses(int signal){
 	(void) signal;
 	log_printf(LOG_DEBUG, "Signal %d received\n",signal);
-	pid_t pidToExit;
+	pid_t pidToExit = -2;
 	int status;
+	log_printf(LOG_DEBUG, "pidToExit %d\n",pidToExit);
 
 	while(pidToExit != 0 && pidToExit != -1){
 		pidToExit = waitpid(-1,&status,WNOHANG); // See man wait for details
+		log_printf(LOG_INFO, "wating for: %d\n",pidToExit);
 	}
 }
 
@@ -112,7 +115,7 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 		if (errorOrBlockToSend == ERROR_BLOCK)
 			return EXIT_FAILURE;
 
-		if (errorOrBlockToSend > metaFileInfo->block_count) {
+		if (errorOrBlockToSend >= metaFileInfo->block_count) {
 			char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE);
 			memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 			memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
@@ -243,7 +246,7 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 		else if (bytesReadedFromClient == 0){
 			requestTimeOut = requestTimeOut + 1;
 			sleep(1);
-			if (requestTimeOut == 30)
+			if (requestTimeOut == MAX_TIME_OUT)
 				return;
 		}
 
@@ -280,7 +283,7 @@ int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t by
 	int timeOut = 0;
 	ssize_t totalBytesSended = 0;
 
-	while (timeOut != 30 && (uint64_t)totalBytesSended != bytesToSendBack){
+	while (timeOut != MAX_TIME_OUT && (uint64_t)totalBytesSended != bytesToSendBack){
 		ssize_t bytesSendedBack = send(socketFileDescriptor,blockToSend,bytesToSendBack,0);
 
 		if (bytesSendedBack < 0){
@@ -296,7 +299,7 @@ int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t by
 		}
 	}
 
-	return timeOut == 30 ? -1 : 0;
+	return timeOut == MAX_TIME_OUT ? -1 : 0;
 }
 
 int checkHeaderReceivedFromServer(char * serverResponse,uint64_t blockNumber){

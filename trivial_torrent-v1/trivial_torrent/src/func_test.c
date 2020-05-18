@@ -141,7 +141,8 @@ void sendRequestInvalidBlockTest(struct torrent_t metaFile){
 
 	while ((uint64_t)totalReadedBytes != RAW_RESPONSE_SIZE){
 		ssize_t partialReadedBytes = recv(sockfd,serverResponse + totalReadedBytes,RAW_RESPONSE_SIZE,0);
-		log_printf(LOG_INFO,"readed Bytes: %ld\n",partialReadedBytes);
+		printf("readed Bytes: %ld\n",partialReadedBytes);
+		sleep(1);
 
 		if (partialReadedBytes < 0) {
 			printf("sendRequestInvalidBlockTest failed\n");
@@ -181,7 +182,7 @@ void sendIncompleteRequestTest(struct torrent_t metaFile){
 }
 
 void sendRequestMultithreadTest(struct torrent_t metaFile){
-	int numberOfThreadToCreate = 20;
+	int numberOfThreadToCreate = 10;
 	pthread_t threadIDs[numberOfThreadToCreate];
 
 	for (int i = 0; i < numberOfThreadToCreate;i++){
@@ -204,10 +205,10 @@ int main(int argc, char **argv) {
 	set_log_level(LOG_NONE);
 
 	struct torrent_t metaFile = getMetaFileInfo(argv[argc -1],0);
-	sendRequestTest(metaFile);
+	//sendRequestTest(metaFile);
 	//sendRequestInvalidBlockTest(metaFile);
-	//sendIncompleteRequestTest(metaFile);
-	//sendRequestMultithreadTest(metaFile);
+	sendIncompleteRequestTest(metaFile);
+	sendRequestMultithreadTest(metaFile);
 	destroy_torrent(&metaFile);
 
 	return 0;

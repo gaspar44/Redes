@@ -107,7 +107,7 @@ void waitForChildProccesses(int signal){
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 	char *serverRequestMessage = (char*)malloc(RAW_MESSAGE_SIZE);
 
-	while(1){
+
 		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
 		int recvError = recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
 
@@ -136,7 +136,7 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 
 			log_printf(LOG_INFO, "blocked not available\n");
 			free(responseBlock);
-			break;
+			//break;
 		}
 
 		else {
@@ -163,10 +163,9 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 			}
 
 			free(responseBlock);
-			if (errorOrBlockToSend == metaFileInfo->block_count - 1)
-				break;
+//			if (errorOrBlockToSend == metaFileInfo->block_count - 1)
+//				break;
 		}
-	}
 
 	free(serverRequestMessage);
 	return EXIT_SUCCESS;

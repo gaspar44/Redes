@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
 			log_printf(LOG_INFO, "File downloaded :)");
 		}
 
-		else if (fileDownloaded == 1){
+		else if (fileDownloaded == -1){
 			log_printf(LOG_INFO,"file not downloaded");
 		}
 

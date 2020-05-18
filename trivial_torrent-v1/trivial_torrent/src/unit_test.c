@@ -18,6 +18,8 @@ void checkHeaderReceivedFromServerTest(char *supressWarning);
 void checkHeaderReceivedFromServerNotAvaliableBlockTest(char *supressWarning);
 void checkHeaderReceivedFromServerIncorrectBlockTestError(char *supressWarning);
 void checkHeaderReceivedFromServerInvalidMagicNumberTestError(char *supressWarning);
+void sendRequestInvalidPeerTestError(struct torrent_t metaFile);
+void sendRequestNoAvaliablePeerTestError(struct torrent_t metaFile);
 
 void checkValidPortTest(char *supressWarning) {
 	(void) supressWarning;
@@ -253,12 +255,26 @@ void checkHeaderReceivedFromServerInvalidMagicNumberTestError(char *supressWarni
 	printf("checkHeaderReceivedFromServerInvalidMagicNumberTestError OK\n");
 }
 
+void sendRequestInvalidPeerTestError(struct torrent_t metaFile){
+	uint64_t peerToUse = metaFile.peer_count + 1;
+	int sockfd = createClientToServerConnection(&metaFile, peerToUse);
+	assert(sockfd == -1);
+	printf("sendRequestInvalidPeerTestError OK\n");
+}
+
+void sendRequestNoAvaliablePeerTestError(struct torrent_t metaFile){
+	uint64_t peerToUse = metaFile.peer_count -1;
+	int sockfd = createClientToServerConnection(&metaFile, peerToUse);
+	assert(sockfd == -1 && errno == ECONNREFUSED);
+	printf("sendRequestNoAvaliablePeerTestError OK\n");
+}
 
 int main(int argc, char **argv) {
 	(void) argc;
 	(void) argv;
 	set_log_level(LOG_NONE);
 
+	struct torrent_t metaFile = getMetaFileInfo(argv[argc -1],0);
 	checkValidPortTest(NULL);
 	checkInvalidPortTestError(NULL);
 	checkReservedPortTestError(NULL);
@@ -273,6 +289,9 @@ int main(int argc, char **argv) {
 	checkHeaderReceivedFromServerNotAvaliableBlockTest(NULL);
 	checkHeaderReceivedFromServerIncorrectBlockTestError(NULL);
 	checkHeaderReceivedFromServerInvalidMagicNumberTestError(NULL);
+	sendRequestInvalidPeerTestError(metaFile);
+	sendRequestNoAvaliablePeerTestError(metaFile);
+	destroy_torrent(&metaFile);
 
 	return 0;
 

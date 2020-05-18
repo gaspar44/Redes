@@ -23,7 +23,7 @@ int checkValidPort(char *portCandidate);
 int allocateServerStructs(int sockFd,struct sockaddr_in servaddr);
 int createServer(int portToUse,struct torrent_t* metafileInfo);
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo);
-void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage);
+int recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage);
 uint64_t checkHeaderReceivedFromClient(char *clientRequest);
 int sendResponseToClient(int socketFileDescriptor, char *blockToSend,uint64_t bytesToSendBack);
 void waitForChildProccesses(int signal);
@@ -32,7 +32,7 @@ struct torrent_t getMetaFileInfo(char *metaFileToDownloadFromServer,int isServer
 int startClient(struct torrent_t *metaInfoFile);
 int checkHeaderReceivedFromServer(char * serverResponse,uint64_t blockNumber);
 int downloadFile(struct torrent_t *metaFileInfo);
-int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumber);
+int createClientToServerConnection(struct torrent_t *metaFileInfo,uint64_t peerToRequest);
 
 static const uint32_t MAGIC_NUMBER = 0xde1c3230;
 
@@ -40,7 +40,7 @@ static const uint8_t MSG_REQUEST = 0;
 static const uint8_t MSG_RESPONSE_OK = 1;
 static const uint8_t MSG_RESPONSE_NA = 2;
 static const uint64_t ERROR_BLOCK = 9999;
-static const int MAX_TIME_OUT = 30;
+static const int MAX_TIME_OUT = 10;
 
 enum { RAW_MESSAGE_SIZE = 13,
 	RAW_RESPONSE_SIZE = 13
@@ -100,7 +100,7 @@ void waitForChildProccesses(int signal){
 
 	while(pidToExit != 0 && pidToExit != -1){
 		pidToExit = waitpid(-1,&status,WNOHANG); // See man wait for details
-		log_printf(LOG_INFO, "wating for: %d\n",pidToExit);
+		log_printf(LOG_DEBUG, "wating for: %d\n",pidToExit);
 	}
 }
 
@@ -109,7 +109,13 @@ int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 
 	while(1){
 		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
-		recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
+		int recvError = recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
+
+		if (recvError == -1){
+			log_printf(LOG_DEBUG, "error from client: %d\n",errno);
+			return EXIT_FAILURE;
+		}
+
 		uint64_t errorOrBlockToSend = checkHeaderReceivedFromClient(serverRequestMessage);
 
 		if (errorOrBlockToSend == ERROR_BLOCK)
@@ -231,7 +237,7 @@ int createServer(int portToUse,struct torrent_t *metaFileInfo){
 	return 0;
 }
 
-void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage) {
+int recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestMessage) {
 	ssize_t totalBytesReadedFromClient = 0;
 	int requestTimeOut = 0;
 	while (totalBytesReadedFromClient != RAW_MESSAGE_SIZE){
@@ -239,15 +245,16 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 
 		if (bytesReadedFromClient < 0){
 			if (errno == EPIPE || errno == ECONNRESET)
-				return;
+				return -1;
 			sleep(1);
 		}
 
 		else if (bytesReadedFromClient == 0){
 			requestTimeOut = requestTimeOut + 1;
 			sleep(1);
-			if (requestTimeOut == MAX_TIME_OUT)
-				return;
+			if (requestTimeOut == MAX_TIME_OUT){
+				return -1;
+			}
 		}
 
 		else{
@@ -255,6 +262,7 @@ void recvMessageRequestFromClient(int socketFileDescriptor,char * serverRequestM
 			totalBytesReadedFromClient = totalBytesReadedFromClient + bytesReadedFromClient;
 		}
 	}
+	return 0;
 }
 
 uint64_t checkHeaderReceivedFromClient(char *clientRequest){
@@ -331,25 +339,31 @@ int checkHeaderReceivedFromServer(char * serverResponse,uint64_t blockNumber){
 	return 0;
 }
 
-int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumber) {
+int createClientToServerConnection(struct torrent_t *metaFileInfo,uint64_t peerToRequest) {
+	if (peerToRequest >= metaFileInfo->peer_count){
+		log_printf(LOG_INFO, "Invalid peer to request");
+		return -1;
+	}
+
 	int sockfd;
 	struct sockaddr_in servaddr;
 
 	if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+		printf("%d\n",errno);
 		log_printf(LOG_INFO, "error opening socket. Exiting...\n");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	log_printf(LOG_INFO,"Socket created successfully\n");
 	memset((char *)&servaddr,0,sizeof(servaddr));
 
 	servaddr.sin_family = AF_INET;
-	servaddr.sin_addr.s_addr = *(uint32_t*)metaFileInfo->peers[blockNumber].peer_address;
-	servaddr.sin_port = metaFileInfo->peers[blockNumber].peer_port;
+	servaddr.sin_addr.s_addr = *(uint32_t*)metaFileInfo->peers[peerToRequest].peer_address;
+	servaddr.sin_port = metaFileInfo->peers[peerToRequest].peer_port;
 
 	if ( (connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr))) == -1) {
 		log_printf(LOG_INFO, "error connecting socket. Exiting...\n");
-		exit(EXIT_FAILURE);
+		return -1;
 	}
 
 	log_printf(LOG_INFO,"Socket connected successfully\n");
@@ -358,9 +372,21 @@ int createClientToServerConnection(struct torrent_t *metaFileInfo,int blockNumbe
 }
 
 int downloadFile(struct torrent_t *metaFileInfo){
+	uint64_t peerToRequest = 0;
 	for (uint64_t blockNumber = 0; blockNumber < metaFileInfo->block_count; blockNumber++){
 		char *blockToRequest = (char*)malloc(RAW_MESSAGE_SIZE);
-		int sockfd = createClientToServerConnection(metaFileInfo, (int)blockNumber);
+		int sockfd = createClientToServerConnection(metaFileInfo, peerToRequest);
+
+		if (sockfd == -1 && errno == ECONNREFUSED && peerToRequest < metaFileInfo->peer_count){
+			log_printf(LOG_INFO, "peer not avaliable, trying other\n");
+			peerToRequest++;
+			blockNumber--;
+			continue;
+		}
+
+		else if (sockfd == -1 && errno != ECONNREFUSED)
+			return sockfd;
+
 		memcpy(blockToRequest, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER),&MSG_REQUEST,sizeof(MSG_REQUEST));
 		memcpy(blockToRequest + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &blockNumber,sizeof(blockNumber));
@@ -410,7 +436,7 @@ int downloadFile(struct torrent_t *metaFileInfo){
 				free(blockToRequest);
 				free(serverResponse);
 				close(sockfd);
-				return 1;
+				return -1;
 			}
 
 			log_printf(LOG_INFO, "data of block %ld received\n",blockNumber);

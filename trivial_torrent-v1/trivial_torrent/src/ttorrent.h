@@ -106,66 +106,60 @@ void waitForChildProccesses(int signal){
 
 int forkProcess(int newFileDescriptorToUse,struct torrent_t *metaFileInfo){
 	char *serverRequestMessage = (char*)malloc(RAW_MESSAGE_SIZE);
+	memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
+	int recvError = recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
 
+	if (recvError == -1){
+		log_printf(LOG_DEBUG, "error from client: %d\n",errno);
+		return EXIT_FAILURE;
+	}
 
-		memset(serverRequestMessage, 0, RAW_MESSAGE_SIZE);
-		int recvError = recvMessageRequestFromClient(newFileDescriptorToUse, serverRequestMessage);
+	uint64_t errorOrBlockToSend = checkHeaderReceivedFromClient(serverRequestMessage);
+	if (errorOrBlockToSend == ERROR_BLOCK)
+		return EXIT_FAILURE;
 
-		if (recvError == -1){
-			log_printf(LOG_DEBUG, "error from client: %d\n",errno);
+	if (errorOrBlockToSend >= metaFileInfo->block_count) {
+		char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE);
+		memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
+
+		int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE);
+
+		if (isSended == -1){
+			log_printf(LOG_INFO, "time out reached while sending back\n");
 			return EXIT_FAILURE;
 		}
 
-		uint64_t errorOrBlockToSend = checkHeaderReceivedFromClient(serverRequestMessage);
+		log_printf(LOG_INFO, "blocked not available\n");
+		free(responseBlock);
+	}
 
-		if (errorOrBlockToSend == ERROR_BLOCK)
+	else {
+		log_printf(LOG_INFO, "sending response to client...\nMagic Number: 0x%X08\nfd: %d\nrequest status: %ld\nblock to send back: %ld\n",MAGIC_NUMBER,newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
+		struct block_t blockToSend;
+		int isLoaded = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
+
+		if (isLoaded == -1){
+			log_printf(LOG_INFO, "Error loading block\n");
 			return EXIT_FAILURE;
-
-		if (errorOrBlockToSend >= metaFileInfo->block_count) {
-			char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE);
-			memcpy(responseBlock, &MAGIC_NUMBER, sizeof(MAGIC_NUMBER));
-			memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_NA,sizeof(MSG_RESPONSE_NA));
-			memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
-
-			int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE);
-
-			if (isSended == -1){
-				log_printf(LOG_INFO, "time out reached while sending back\n");
-				return EXIT_FAILURE;
-			}
-
-			log_printf(LOG_INFO, "blocked not available\n");
-			free(responseBlock);
-			//break;
 		}
 
-		else {
-			log_printf(LOG_INFO, "sending response to client...\nMagic Number: 0x%X08\nfd: %d\nrequest status: %ld\nblock to send back: %ld\n",MAGIC_NUMBER,newFileDescriptorToUse,MSG_RESPONSE_OK,errorOrBlockToSend);
-			struct block_t blockToSend;
-			int isLoaded = load_block(metaFileInfo, errorOrBlockToSend, &blockToSend);
+		char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE + blockToSend.size);
+		memcpy(responseBlock,&MAGIC_NUMBER , sizeof(MAGIC_NUMBER));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_OK,sizeof(MSG_RESPONSE_OK));
+		memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
+		memcpy(responseBlock + RAW_RESPONSE_SIZE, blockToSend.data, blockToSend.size);
 
-			if (isLoaded == -1){
-				log_printf(LOG_INFO, "Error loading block\n");
-				return EXIT_FAILURE;
-			}
+		int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE + blockToSend.size);
 
-			char *responseBlock = (char*)malloc(RAW_RESPONSE_SIZE + blockToSend.size);
-			memcpy(responseBlock,&MAGIC_NUMBER , sizeof(MAGIC_NUMBER));
-			memcpy(responseBlock + sizeof(MAGIC_NUMBER),&MSG_RESPONSE_OK,sizeof(MSG_RESPONSE_OK));
-			memcpy(responseBlock + sizeof(MAGIC_NUMBER) + sizeof(MSG_REQUEST), &errorOrBlockToSend,sizeof(errorOrBlockToSend));
-			memcpy(responseBlock + RAW_RESPONSE_SIZE, blockToSend.data, blockToSend.size);
-
-			int isSended = sendResponseToClient(newFileDescriptorToUse,responseBlock,RAW_RESPONSE_SIZE + blockToSend.size);
-
-			if (isSended == -1){
-				log_printf(LOG_INFO, "time out reached while sending back\n");
-				return EXIT_FAILURE;
-			}
-
-			free(responseBlock);
-//			if (errorOrBlockToSend == metaFileInfo->block_count - 1)
-//				break;
+		if (isSended == -1){
+			log_printf(LOG_INFO, "time out reached while sending back\n");
+			return EXIT_FAILURE;
 		}
+
+		free(responseBlock);
+	}
 
 	free(serverRequestMessage);
 	return EXIT_SUCCESS;

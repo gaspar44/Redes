@@ -396,8 +396,9 @@ int downloadFile(struct torrent_t *metaFileInfo){
 
 		char *serverResponse = malloc(RAW_RESPONSE_SIZE + block.size);
 		ssize_t totalReadedBytes = 0;
+		int clientTimeout = 0;
 
-		while (1) {
+		while ((uint64_t)totalReadedBytes < RAW_RESPONSE_SIZE + block.size) {
 			ssize_t partialReadedBytes = recv(sockfd,serverResponse + totalReadedBytes,RAW_RESPONSE_SIZE + block.size,0);
 			log_printf(LOG_INFO,"readed Bytes: %ld\n",partialReadedBytes);
 
@@ -406,12 +407,20 @@ int downloadFile(struct torrent_t *metaFileInfo){
 				exit(EXIT_FAILURE);
 			}
 
-			else {
-				totalReadedBytes = totalReadedBytes + partialReadedBytes;
-				if ((uint64_t)totalReadedBytes >= RAW_RESPONSE_SIZE + block.size){
+			else if (partialReadedBytes == 0){
+				clientTimeout++;
+				sleep(1);
+
+				if (clientTimeout == MAX_TIME_OUT){
+					log_printf(LOG_INFO, "peer dead, trying other\n");
+					peerToRequest++;
+					blockNumber--;
 					break;
 				}
 			}
+
+			totalReadedBytes = totalReadedBytes + partialReadedBytes;
+
 		}
 			int validHeader = checkHeaderReceivedFromServer(serverResponse,blockNumber);
 
